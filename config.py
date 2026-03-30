@@ -1,0 +1,3 @@
+TOKEN = "TU_TOKEN_DE_TELEGRAM"
+DOWNLOAD_PATH = "downloads"
+LOG_FILE = "logs.txt"
