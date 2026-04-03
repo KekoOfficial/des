@@ -5,10 +5,12 @@ import subprocess
 import glob
 
 def get_file_size(path):
-    return os.path.getsize(path) / (1024 * 1024)
+    if os.path.exists(path):
+        return os.path.getsize(path) / (1024 * 1024)
+    return 0
 
 def split_file(input_file):
-    """Divide archivos mayores a 2GB sin perder calidad."""
+    """Divide archivos mayores a 2GB para Telegram."""
     size_mb = get_file_size(input_file)
     if size_mb < 2000:
         return [input_file]
@@ -33,43 +35,47 @@ def download_media(url):
     if not os.path.exists("downloads"): os.makedirs("downloads")
     
     uid = str(uuid.uuid4())[:8]
-    # Usamos una plantilla de nombre más simple para evitar errores de caracteres
     outtmpl = f'downloads/{uid}_%(title).30s.%(ext)s'
 
     ydl_opts = {
-        # Buscamos el mejor video MP4 y el mejor audio disponible
+        # CALIDAD Y FORMATO
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': outtmpl,
-        'concurrent_fragment_downloads': 15,
+        
+        # --- ACELERADOR ARIA2 (VELOCIDAD X16) ---
+        'external_downloader': 'aria2c',
+        'external_downloader_args': [
+            '--min-split-size=1M',
+            '--max-connection-per-server=16',
+            '--max-concurrent-downloads=16',
+            '--split=16',
+            '--retry-wait=1'
+        ],
+        
+        # --- DISFRAZ DE NAVEGADOR (EVITA BLOQUEOS) ---
+        'impersonate': 'chrome', 
+        
         'noplaylist': True,
         'writethumbnail': True,
         'quiet': True,
-        # REVISIÓN DE POSTPROCESADORES:
+        'no_warnings': True,
+        
+        # POST-PROCESAMIENTO
         'postprocessors': [
-            {
-                # Extraer Audio a MP3
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            },
-            {
-                # Asegurar que el video sea MP4 compatible
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }
+            {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'},
+            {'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'},
         ],
-        'keepvideo': True, # Mantiene el MP4 tras extraer el MP3
+        'keepvideo': True,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        # Obtenemos el nombre base sin la extensión original
         base = ydl.prepare_filename(info).rsplit('.', 1)[0]
         
         video_raw = f"{base}.mp4"
         audio_file = f"{base}.mp3"
         
-        # Lógica para la miniatura (.jpg, .webp, .png)
+        # Buscar miniatura
         thumb_file = None
         for ext in ['jpg', 'webp', 'png', 'jpeg']:
             temp_thumb = f"{base}.{ext}"
@@ -77,7 +83,6 @@ def download_media(url):
                 thumb_file = temp_thumb
                 break
 
-        # Procesar divisiones si el video es gigante
         video_parts = split_file(video_raw)
         
         return {
