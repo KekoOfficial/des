@@ -1,22 +1,30 @@
 import yt_dlp
 import os
-from config import CONCURRENT_FRAGMENTS
+import uuid
 
 def download_media(url):
+    """
+    Descarga video y audio simultáneamente usando fragmentación masiva.
+    Usa IDs únicos (UUID) para que los archivos de diferentes usuarios
+    no choquen entre sí en el disco.
+    """
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
 
-    # Plantilla para el nombre del archivo
-    outtmpl = 'downloads/%(title)s.%(ext)s'
+    # Generamos un nombre único para esta sesión de descarga
+    unique_id = str(uuid.uuid4())[:8]
+    outtmpl = f'downloads/{unique_id}_%(title).50s.%(ext)s'
 
     ydl_opts = {
-        # Formato: Buscar MP4 directo o combinar el mejor video + mejor audio
+        # Intenta bajar MP4 nativo o combinar el mejor video + mejor audio
         'format': 'bestvideo[ext=mp4]+bestaudio[m4a]/best[ext=mp4]/best',
         'outtmpl': outtmpl,
-        'concurrent_fragment_downloads': CONCURRENT_FRAGMENTS,
+        # VELOCIDAD EXTREMA: 15 fragmentos simultáneos
+        'concurrent_fragment_downloads': 15,
         'noplaylist': True,
         'quiet': True,
-        # Post-procesadores para generar MP3 y asegurar MP4
+        'no_warnings': True,
+        # POST-PROCESAMIENTO: Extraer MP3 y asegurar MP4
         'postprocessors': [
             {
                 'key': 'FFmpegExtractAudio',
@@ -28,15 +36,15 @@ def download_media(url):
                 'preferedformat': 'mp4',
             }
         ],
-        'keepvideo': True, # Mantiene el MP4 después de extraer el MP3
+        'keepvideo': True, # No borra el MP4 al terminar el MP3
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        # Limpiar el nombre base para encontrar los archivos resultantes
-        base_filename = ydl.prepare_filename(info).rsplit('.', 1)[0]
+        # Obtenemos el nombre base del archivo descargado
+        filename_base = ydl.prepare_filename(info).rsplit('.', 1)[0]
         
-        video_file = f"{base_filename}.mp4"
-        audio_file = f"{base_filename}.mp3"
+        video_path = f"{filename_base}.mp4"
+        audio_path = f"{filename_base}.mp3"
         
-        return [video_file, audio_file]
+        return [video_path, audio_path]
