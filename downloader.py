@@ -2,22 +2,21 @@ import yt_dlp
 import os
 import uuid
 import subprocess
+import glob
 
 def get_file_size(path):
-    return os.path.getsize(path) / (1024 * 1024) # Retorna MB
+    return os.path.getsize(path) / (1024 * 1024)
 
 def split_file(input_file):
-    """Divide archivos mayores a 2000MB usando FFmpeg sin perder calidad."""
+    """Divide archivos mayores a 2GB sin perder calidad."""
     size_mb = get_file_size(input_file)
     if size_mb < 2000:
         return [input_file]
 
-    print(f"Dividiendo archivo pesado: {input_file}")
     base = input_file.rsplit('.', 1)[0]
     ext = input_file.rsplit('.', 1)[1]
-    
-    # Comando FFmpeg para fragmentar en partes de 45 minutos (ajustable)
     output_pattern = f"{base}_part%03d.{ext}"
+    
     cmd = [
         'ffmpeg', '-i', input_file, 
         '-c', 'copy', '-map', '0', 
@@ -26,53 +25,63 @@ def split_file(input_file):
         output_pattern
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    os.remove(input_file) # Borrar el original gigante
+    if os.path.exists(input_file): os.remove(input_file)
     
-    # Retornar lista de partes creadas
-    import glob
     return sorted(glob.glob(f"{base}_part*.{ext}"))
 
 def download_media(url):
     if not os.path.exists("downloads"): os.makedirs("downloads")
     
     uid = str(uuid.uuid4())[:8]
-    outtmpl = f'downloads/{uid}_%(title).50s.%(ext)s'
+    # Usamos una plantilla de nombre más simple para evitar errores de caracteres
+    outtmpl = f'downloads/{uid}_%(title).30s.%(ext)s'
 
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[m4a]/best[ext=mp4]/best',
+        # Buscamos el mejor video MP4 y el mejor audio disponible
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': outtmpl,
         'concurrent_fragment_downloads': 15,
         'noplaylist': True,
-        'writethumbnail': True, # Extraer miniatura
-        'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        'writethumbnail': True,
+        'quiet': True,
+        # REVISIÓN DE POSTPROCESADORES:
         'postprocessors': [
-            {'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'},
-            {'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'},
-            {'key': 'FFmpegEmbedSubtitle'},
+            {
+                # Extraer Audio a MP3
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            },
+            {
+                # Asegurar que el video sea MP4 compatible
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }
         ],
-        'keepvideo': True,
+        'keepvideo': True, # Mantiene el MP4 tras extraer el MP3
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
+        # Obtenemos el nombre base sin la extensión original
         base = ydl.prepare_filename(info).rsplit('.', 1)[0]
         
         video_raw = f"{base}.mp4"
         audio_file = f"{base}.mp3"
-        thumb_file = f"{base}.jpg" # yt-dlp suele bajar .jpg o .webp
         
-        # Si no existe .jpg, probamos .webp o .png
-        if not os.path.exists(thumb_file):
-            for ext in ['webp', 'png']:
-                if os.path.exists(f"{base}.{ext}"):
-                    thumb_file = f"{base}.{ext}"
-                    break
+        # Lógica para la miniatura (.jpg, .webp, .png)
+        thumb_file = None
+        for ext in ['jpg', 'webp', 'png', 'jpeg']:
+            temp_thumb = f"{base}.{ext}"
+            if os.path.exists(temp_thumb):
+                thumb_file = temp_thumb
+                break
 
-        # Procesar el video (dividir si es necesario)
+        # Procesar divisiones si el video es gigante
         video_parts = split_file(video_raw)
         
         return {
             "videos": video_parts, 
             "audio": audio_file, 
-            "thumb": thumb_file if os.path.exists(thumb_file) else None
+            "thumb": thumb_file
         }
